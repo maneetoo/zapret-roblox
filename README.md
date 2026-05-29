@@ -1,6 +1,6 @@
 <div align="center">
 
-# <img src="https://cdn-icons-png.flaticon.com/128/5968/5968756.png" height=28 /> `zapret-roblox` <img src="https://cdn-icons-png.flaticon.com/128/1384/1384060.png" height=28 />
+# <img src="https://raw.githubusercontent.com/maneetoo/zapret-roblox/f997389295933f99db343b6b67b2a0c76e870315/.github/assets/Roblox-Icon.svg" height=32 /> `zapret-roblox` <img src="https://cdn-icons-png.flaticon.com/128/5968/5968756.png" height=28 />
 
 **Оригинал:** https://github.com/Flowseal/zapret-discord-youtube
 </div>
@@ -60,9 +60,10 @@
 2. Распокуйте в любую **ПУСТУЮ** папку на вашем компьютере
 3. Запустите `service.bat` (он должен быть последний в списке корневой папки `zapret`)
 4. Поменяйте `4. Game Filtet` на `enabled`, а `5. IPSet Filter` на `any`
-5. После этого запустите `11. Run Tests` (в том же `service.bat`) и запустите там тесты `[1, 1]` (это может занять несколько минут)
-6. В конце вам должно показать самый подходящий вам батник (например `ALT 11`) - запустите его и проверьте на работу `Roblox`/`Roblox Studio`
-7. Если не работает (крайний случай) -> Запускайте батники по одному -> Работает - Оставьте
+![service-image](./.github/assets/zapret-roblox-service.png)
+6. После этого запустите `11. Run Tests` (в том же `service.bat`) и запустите там тесты `[1, 1]` (это может занять несколько минут)
+7. В конце вам должно показать самый подходящий вам батник (например `ALT 11`) - запустите его и проверьте на работу `Roblox`/`Roblox Studio`
+8. Если не работает (крайний случай) -> Запускайте батники по одному -> Работает - Оставьте
    -> Не работает - Запустите следующий и проверьте
 
 ## ⚠️ Перестал работать `zapret-roblox`
