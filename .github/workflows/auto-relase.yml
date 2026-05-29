@@ -1,0 +1,81 @@
+name: Auto Release on Upstream Update
+
+on:
+  schedule:
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  check-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get latest upstream release
+        id: upstream
+        run: |
+          RELEASE_DATA=$(curl -s https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest)
+          LATEST_TAG=$(echo "$RELEASE_DATA" | jq -r .tag_name)
+          echo "tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          echo "$RELEASE_DATA" | jq -r .body > /tmp/upstream-body.md
+
+      - name: Get current version
+        id: current
+        run: |
+          echo "version=$(cat .service/version.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Check if update needed
+        id: compare
+        run: |
+          if [ "${{ steps.upstream.outputs.tag }}" != "${{ steps.current.outputs.version }}" ]; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump version.txt
+        if: steps.compare.outputs.needed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "${{ steps.upstream.outputs.tag }}" > .service/version.txt
+          git add .service/version.txt
+          git commit -m "chore: bump version to ${{ steps.upstream.outputs.tag }} [skip ci]"
+          git push
+
+      - name: Run sync-upstream and wait
+        if: steps.compare.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run sync-upstream.yml
+          sleep 15
+          RUN_ID=$(gh run list --workflow=sync-upstream.yml --limit=1 --json databaseId --jq '.[0].databaseId')
+          gh run watch "$RUN_ID" --exit-status
+
+      - name: Run release workflow and wait
+        if: steps.compare.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release.yml -f tag="${{ steps.upstream.outputs.tag }}"
+          sleep 15
+          RUN_ID=$(gh run list --workflow=release.yml --limit=1 --json databaseId --jq '.[0].databaseId')
+          gh run watch "$RUN_ID" --exit-status
+
+      - name: Append AUTO-SYNCED note and update release
+        if: steps.compare.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.upstream.outputs.tag }}"
+          UPSTREAM_RELEASE_URL="https://github.com/Flowseal/zapret-discord-youtube/releases/tag/${TAG}"
+
+          printf '\n\n---\n# [AUTO-SYNCED FROM [ZAPRET](%s)]' "$UPSTREAM_RELEASE_URL" >> /tmp/upstream-body.md
+          gh release edit "$TAG" --notes-file /tmp/upstream-body.md
