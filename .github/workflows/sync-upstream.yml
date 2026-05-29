@@ -374,5 +374,5 @@ jobs:
             echo "Nothing new to commit in patch files."
           else
             git commit -m "chore: inject Roblox domains & targets [skip ci]"
+            git push
           fi
-          git push
