@@ -1,0 +1,269 @@
+name: Sync releases from upstream
+
+on:
+  workflow_run:
+    workflows: ["Sync upstream + Roblox patch"]
+    types: [completed]
+
+  workflow_dispatch:
+    inputs:
+      run_sync_first:
+        description: "Запустить sync-upstream.yml перед созданием релиза"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+      backfill_tag:
+        description: "Принудительно пересоздать конкретный тег (напр. 1.9.9a). Оставь пустым для авто."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  ensure-sync:
+    name: "Ensure sync-upstream ran first"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.run_sync_first == 'true'
+
+    steps:
+      - name: Trigger sync-upstream.yml and wait for completion
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const repoData = await github.rest.repos.get({ owner, repo });
+            const ref = repoData.data.default_branch;
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner, repo,
+              workflow_id: 'sync-upstream.yml',
+              ref
+            });
+            core.info('sync-upstream.yml dispatched, waiting 15s for it to register…');
+            await new Promise(r => setTimeout(r, 15000));
+
+            let attempts = 0;
+            const maxAttempts = 30;
+            while (attempts < maxAttempts) {
+              await new Promise(r => setTimeout(r, 20000));
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                owner, repo,
+                workflow_id: 'sync-upstream.yml',
+                per_page: 1
+              });
+              const run = data.workflow_runs[0];
+              if (!run) { attempts++; continue; }
+              core.info(`Run #${run.run_number} status: ${run.status} / ${run.conclusion}`);
+              if (run.status === 'completed') {
+                if (run.conclusion !== 'success') {
+                  core.setFailed(`sync-upstream.yml finished with: ${run.conclusion}`);
+                }
+                break;
+              }
+              attempts++;
+            }
+            if (attempts >= maxAttempts) {
+              core.setFailed('Timed out waiting for sync-upstream.yml');
+            }
+
+  sync-releases:
+    name: "Sync upstream releases"
+    runs-on: ubuntu-latest
+    needs: [ensure-sync]
+
+    if: |
+      always() && (
+        (github.event_name == 'workflow_run'    && github.event.workflow_run.conclusion == 'success') ||
+        (github.event_name == 'workflow_dispatch' && (
+          needs.ensure-sync.result == 'success' ||
+          needs.ensure-sync.result == 'skipped'
+        ))
+      )
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch upstream releases
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASES=$(curl -s \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases?per_page=20")
+
+          echo "$RELEASES" > /tmp/upstream_releases.json
+
+          TAGS=$(echo "$RELEASES" | jq -r '.[].tag_name')
+          echo "Found upstream tags:"
+          echo "$TAGS"
+
+          LATEST=$(echo "$RELEASES" | jq -r '.[0].tag_name')
+          echo "latest_tag=${LATEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Determine missing releases
+        id: missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FORCE_TAG="${{ inputs.backfill_tag }}"
+          MISSING=()
+
+          if [[ -n "$FORCE_TAG" ]]; then
+            MISSING=("$FORCE_TAG")
+          else
+            UPSTREAM_TAGS=$(jq -r '.[].tag_name' /tmp/upstream_releases.json)
+            for TAG in $UPSTREAM_TAGS; do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                "https://api.github.com/repos/${{ github.repository }}/releases/tags/${TAG}")
+              if [[ "$STATUS" != "200" ]]; then
+                MISSING+=("$TAG")
+                echo "  → ${TAG} is MISSING in our repo"
+              else
+                echo "  ✓ ${TAG} already exists"
+              fi
+            done
+          fi
+
+          JOINED=$(IFS=','; echo "${MISSING[*]}")
+          echo "tags=${JOINED}" >> "$GITHUB_OUTPUT"
+
+          if [[ ${#MISSING[@]} -eq 0 ]]; then
+            echo "nothing_to_do=true" >> "$GITHUB_OUTPUT"
+            echo "All releases already in sync."
+          else
+            echo "nothing_to_do=false" >> "$GITHUB_OUTPUT"
+            echo "Tags to create: ${JOINED}"
+          fi
+
+      - name: Create missing releases
+        if: steps.missing.outputs.nothing_to_do == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_URL: "https://github.com/Flowseal/zapret-discord-youtube"
+        run: |
+          IFS=',' read -ra TAGS <<< "${{ steps.missing.outputs.tags }}"
+
+          for TAG in "${TAGS[@]}"; do
+            echo "════════════════════════════════════════"
+            echo "Processing tag: ${TAG}"
+
+            RELEASE_JSON=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/tags/${TAG}")
+
+            TITLE=$(echo "$RELEASE_JSON" | jq -r '.name // empty')
+            BODY=$(echo  "$RELEASE_JSON" | jq -r '.body // empty')
+            IS_PRE=$(echo "$RELEASE_JSON" | jq -r '.prerelease')
+
+            if [[ -z "$TITLE" && -z "$BODY" ]]; then
+              echo "::warning::Tag ${TAG} not found in upstream, skipping."
+              continue
+            fi
+
+            APPENDIX=$'\n\n---\n# [AUTO-SYNCED FROM [ZAPRET]('"${UPSTREAM_URL}/releases/tag/${TAG}"')]'
+            FULL_BODY="${BODY}${APPENDIX}"
+
+            git fetch --tags origin 2>/dev/null || true
+            if ! git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+              echo "Tag ${TAG} not found locally, pulling from upstream..."
+              git remote add upstream "${UPSTREAM_URL}.git" 2>/dev/null || true
+              git fetch upstream "refs/tags/${TAG}:refs/tags/${TAG}" --no-tags
+              git push origin "refs/tags/${TAG}" 2>/dev/null || echo "Tag push skipped (may already exist remotely)"
+            fi
+
+            ARCHIVE_NAME="zapret-discord-youtube-${TAG}.zip"
+            echo "Building ${ARCHIVE_NAME}…"
+
+            TMP_DIR=$(mktemp -d)
+            git archive --format=zip "${TAG}" \
+              --prefix="zapret-discord-youtube-${TAG}/" \
+              $(git ls-tree -r --name-only "${TAG}" | grep -v '^\.github/') \
+              -o "/tmp/${ARCHIVE_NAME}" 2>/dev/null || \
+            git archive --format=zip "${TAG}" \
+              --prefix="zapret-discord-youtube-${TAG}/" \
+              -o "/tmp/${ARCHIVE_NAME}"
+
+            if [[ ! -f "/tmp/${ARCHIVE_NAME}" ]]; then
+              git worktree add "${TMP_DIR}/wt" "${TAG}" 2>/dev/null
+              cd "${TMP_DIR}/wt"
+              zip -r "/tmp/${ARCHIVE_NAME}" . \
+                --exclude ".git/*" \
+                --exclude ".github/*" \
+                --exclude ".git"
+              cd -
+              git worktree remove "${TMP_DIR}/wt" --force 2>/dev/null || true
+            fi
+
+            echo "Archive size: $(du -sh "/tmp/${ARCHIVE_NAME}" | cut -f1)"
+
+            echo "Creating release ${TAG} in ${{ github.repository }}…"
+            RELEASE_RESP=$(curl -s -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases" \
+              -d "$(jq -n \
+                --arg tag_name    "${TAG}" \
+                --arg name        "${TITLE}" \
+                --arg body        "${FULL_BODY}" \
+                --argjson prerel  "${IS_PRE}" \
+                '{
+                  tag_name:         $tag_name,
+                  name:             $name,
+                  body:             $body,
+                  draft:            false,
+                  prerelease:       $prerel,
+                  generate_release_notes: false
+                }')")
+
+            RELEASE_ID=$(echo "$RELEASE_RESP" | jq -r '.id')
+            if [[ -z "$RELEASE_ID" || "$RELEASE_ID" == "null" ]]; then
+              echo "::error::Failed to create release for ${TAG}:"
+              echo "$RELEASE_RESP"
+              continue
+            fi
+            echo "Created release id=${RELEASE_ID}"
+
+            echo "Uploading ${ARCHIVE_NAME}…"
+            UPLOAD_RESP=$(curl -s -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/zip" \
+              --data-binary "@/tmp/${ARCHIVE_NAME}" \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/${RELEASE_ID}/assets?name=${ARCHIVE_NAME}")
+
+            ASSET_ID=$(echo "$UPLOAD_RESP" | jq -r '.id')
+            if [[ -z "$ASSET_ID" || "$ASSET_ID" == "null" ]]; then
+              echo "::warning::Asset upload may have failed:"
+              echo "$UPLOAD_RESP"
+            else
+              echo "Asset uploaded, id=${ASSET_ID}"
+            fi
+
+            UPSTREAM_ASSETS=$(echo "$RELEASE_JSON" | \
+              jq -r '.assets[] | select(.content_type != "application/zip" or .name != "'"${ARCHIVE_NAME}"'") | "\(.browser_download_url)|\(.name)|  \(.content_type)"')
+
+            while IFS='|' read -r DL_URL ASSET_FILE ASSET_TYPE; do
+              [[ -z "$DL_URL" ]] && continue
+              echo "Mirroring upstream asset: ${ASSET_FILE}"
+              curl -sL "$DL_URL" -o "/tmp/${ASSET_FILE}"
+              curl -s -X POST \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Content-Type: ${ASSET_TYPE}" \
+                --data-binary "@/tmp/${ASSET_FILE}" \
+                "https://uploads.github.com/repos/${{ github.repository }}/releases/${RELEASE_ID}/assets?name=${ASSET_FILE}" \
+                | jq -r '"  → Asset \(.name) id=\(.id)"' || true
+            done <<< "$UPSTREAM_ASSETS"
+
+            echo "✓ Release ${TAG} done."
+            rm -f "/tmp/${ARCHIVE_NAME}"
+          done

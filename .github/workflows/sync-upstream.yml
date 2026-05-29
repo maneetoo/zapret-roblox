@@ -1,0 +1,348 @@
+name: Sync upstream + Roblox patch
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-and-patch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+
+      - name: Add upstream remote & fetch
+        run: |
+          git remote add upstream https://github.com/Flowseal/zapret-discord-youtube.git
+          git fetch upstream
+
+      - name: Detect upstream default branch
+        id: upstream_branch
+        run: |
+          BRANCH=$(git remote show upstream | awk '/HEAD branch/{print $NF}')
+          echo "name=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+
+      - name: Check for upstream changes
+        id: changes
+        run: |
+          UPSTREAM_SHA=$(git rev-parse "upstream/${{ steps.upstream_branch.outputs.name }}")
+          if git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD; then
+            echo "has_new=false" >> "$GITHUB_OUTPUT"
+            echo "No new upstream commits — skipping merge."
+          else
+            echo "has_new=true" >> "$GITHUB_OUTPUT"
+            echo "New upstream commits found."
+          fi
+
+      - name: Backup .github directory
+        if: steps.changes.outputs.has_new == 'true'
+        run: cp -r .github /tmp/.github_backup
+
+      - name: Merge upstream
+        if: steps.changes.outputs.has_new == 'true'
+        run: |
+          BRANCH="${{ steps.upstream_branch.outputs.name }}"
+          git merge "upstream/${BRANCH}" \
+            --no-edit \
+            --allow-unrelated-histories \
+            -X theirs \
+            -m "chore: sync with upstream/${BRANCH} @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+
+      - name: Restore .github directory
+        if: steps.changes.outputs.has_new == 'true'
+        run: |
+          rm -rf .github
+          cp -r /tmp/.github_backup .github
+          git add .github
+          git diff --cached --quiet || \
+            git commit -m "chore: restore .github after upstream sync"
+
+      - name: Inject Roblox domains → lists/list-general.txt
+        run: |
+          FILE="lists/list-general.txt"
+          mkdir -p "$(dirname "$FILE")"
+          touch "$FILE"
+
+          DOMAINS=(
+            roblox.com
+            www.roblox.com
+            auth.roblox.com
+            accountsettings.roblox.com
+            assetgame.roblox.com
+            assetdelivery.roblox.com
+            catalog.roblox.com
+            avatar.roblox.com
+            itemconfiguration.roblox.com
+            economy.roblox.com
+            apis.roblox.com
+            clientsettings.api.roblox.com
+            chat.roblox.com
+            voice.roblox.com
+            friends.roblox.com
+            groups.roblox.com
+            notifications.roblox.com
+            presence.roblox.com
+            realtime.roblox.com
+            chatmoderation.roblox.com
+            studio.roblox.com
+            publish.roblox.com
+            develop.roblox.com
+            devforum.roblox.com
+            setup.rbxcdn.com
+            rbxcdn.com
+            versioncompatibility.roblox.com
+            sitetest.roblox.com
+            trades.roblox.com
+            translations.roblox.com
+            tutorials.roblox.com
+            ecs.roblox.com
+            gameanalytics.roblox.com
+            metrics.roblox.com
+            telemetry.roblox.com
+            abtesting.roblox.com
+            adconfiguration.roblox.com
+            ads.roblox.com
+            adserver.roblox.com
+            adspolicy.roblox.com
+            api.roblox.com
+            billing.roblox.com
+            captcha.roblox.com
+            cdn.roblox.com
+            chatrealtime.roblox.com
+            client-telemetry.roblox.com
+            clientsettingscdn.roblox.com
+            clicks.roblox.com
+            contentstore.roblox.com
+            ephemeralcounters.api.roblox.com
+            followings.roblox.com
+            gamepersistence.roblox.com
+            games.roblox.com
+            graphql.roblox.com
+            groupsmoderation.roblox.com
+            inventory.roblox.com
+            locale.roblox.com
+            localizationtables.roblox.com
+            matchmaking.roblox.com
+            pointbalancing.roblox.com
+            premiumfeatures.roblox.com
+            privatemessages.roblox.com
+            ratings.roblox.com
+            search.roblox.com
+            thumbnails.roblox.com
+            tix.roblox.com
+            translationservice.roblox.com
+            users.roblox.com
+            usersmoderation.roblox.com
+            web.roblox.com
+            wiki.roblox.com
+            wire.roblox.com
+            clientconfig.roblox.com
+            config.roblox.com
+            crl.roblox.com
+            status.roblox.com
+            setup.roblox.com
+            update.roblox.com
+            s3.amazonaws.com
+            stun.l.google.com
+            stun1.l.google.com
+            stun2.l.google.com
+            stun3.l.google.com
+            stun4.l.google.com
+            stun.services.mozilla.com
+            global.stun.twilio.com
+            turn.twilio.com
+            geoip.roblox.com
+            geoip.services.roblox.com
+            ocsp.digicert.com
+            ocsp.verisign.com
+            crl.verisign.com
+            setup-cdn.roblox.com
+            roblox-setup.roblox.com
+            roblox-update.roblox.com
+            update-cdn.roblox.com
+            api.rbxcdn.com
+            setup.api.rbxcdn.com
+            setup.cache.rbxcdn.com
+            cs.rbxcdn.com
+            roblox-setup.cache.roblox.com
+            roblox-update.cache.roblox.com
+            setup.cache.roblox.com
+            update.cache.roblox.com
+            gamejoin.roblox.com
+            client.roblox.com
+            contentdelivery.roblox.com
+            economycdn.roblox.com
+            matchmaking.api.roblox.com
+            presence.api.roblox.com
+            friends.api.roblox.com
+            groups.api.roblox.com
+            inventory.api.roblox.com
+            catalog.api.roblox.com
+            avatar.api.roblox.com
+            users.api.roblox.com
+            develop.api.roblox.com
+            devforum.api.roblox.com
+            akamaized.net
+            cloudfront.net
+            amazonaws.com
+            rblx.com
+            robloxapp.com
+            robloxgames.com
+            robloxlabs.com
+            rbx.com
+            rbxlabs.com
+            rbxcdn.xyz
+            rbxcdn.site
+            rbxcdn.tech
+            rbxcdn.one
+            rbxcdn.today
+            rbxcdn.world
+            rbxcdn.services
+            rbxcdn.work
+            rbxcdn.space
+            rbxcdn.online
+            rbxcdn.store
+            rbxcdn.fun
+            rbxcdn.biz
+            rbxcdn.us
+            rbxcdn.org
+            rbxcdn.net
+            rbxcdn.co
+            rbxcdn.me
+            rbxcdn.tv
+            rbxcdn.cc
+            rbxcdn.gg
+            rbxcdn.dev
+            rbxcdn.io
+            edgecastcdn.net
+            footprint.net
+            llnwd.net
+            hwcdn.net
+            gcdn.co
+            g-cdn.net
+            cdngc.net
+            cdngs.net
+            secure.footprint.net
+            secure.llnwd.net
+            roblox.qq.com
+            roblox.cn
+          )
+
+          ADDED=0
+          for domain in "${DOMAINS[@]}"; do
+            if ! grep -qxF "$domain" "$FILE"; then
+              echo "$domain" >> "$FILE"
+              ADDED=$((ADDED + 1))
+            fi
+          done
+          echo "Added ${ADDED} new domain(s) to ${FILE}"
+
+
+      - name: Inject Roblox targets → utils/targets.txt
+        run: |
+          FILE="utils/targets.txt"
+          mkdir -p "$(dirname "$FILE")"
+          touch "$FILE"
+
+          add_entry() {
+            local entry="$1"
+            local key
+            key=$(echo "$entry" | cut -d'=' -f1 | xargs)
+            if ! grep -qP "^\s*${key}\s*=" "$FILE"; then
+              echo "$entry" >> "$FILE"
+            fi
+          }
+
+          add_entry 'ROBLOX                       = "https://roblox.com"'
+          add_entry 'ROBLOX_WWW                   = "https://www.roblox.com"'
+          add_entry 'ROBLOX_AUTH                  = "https://auth.roblox.com"'
+          add_entry 'ROBLOX_ACCOUNT_SETTINGS      = "https://accountsettings.roblox.com"'
+          add_entry 'ROBLOX_WEB                   = "https://web.roblox.com"'
+          add_entry 'ROBLOX_STATUS                = "https://status.roblox.com"'
+          add_entry 'ROBLOX_DEVFORUM              = "https://devforum.roblox.com"'
+          add_entry 'ROBLOX_WIKI                  = "https://wiki.roblox.com"'
+
+          add_entry 'ROBLOX_API                   = "https://api.roblox.com"'
+          add_entry 'ROBLOX_APIS                  = "https://apis.roblox.com"'
+          add_entry 'ROBLOX_GAMES_API             = "https://games.roblox.com"'
+          add_entry 'ROBLOX_USERS_API             = "https://users.roblox.com"'
+          add_entry 'ROBLOX_FRIENDS_API           = "https://friends.roblox.com"'
+          add_entry 'ROBLOX_GROUPS_API            = "https://groups.roblox.com"'
+          add_entry 'ROBLOX_CATALOG_API           = "https://catalog.roblox.com"'
+          add_entry 'ROBLOX_AVATAR_API            = "https://avatar.roblox.com"'
+          add_entry 'ROBLOX_ECONOMY_API           = "https://economy.roblox.com"'
+          add_entry 'ROBLOX_INVENTORY_API         = "https://inventory.roblox.com"'
+          add_entry 'ROBLOX_PRESENCE_API          = "https://presence.roblox.com"'
+          add_entry 'ROBLOX_NOTIFICATIONS_API     = "https://notifications.roblox.com"'
+          add_entry 'ROBLOX_CHAT_API              = "https://chat.roblox.com"'
+          add_entry 'ROBLOX_VOICE_API             = "https://voice.roblox.com"'
+          add_entry 'ROBLOX_DEVELOP_API           = "https://develop.roblox.com"'
+          add_entry 'ROBLOX_PUBLISH_API           = "https://publish.roblox.com"'
+          add_entry 'ROBLOX_THUMBNAILS_API        = "https://thumbnails.roblox.com"'
+          add_entry 'ROBLOX_SEARCH_API            = "https://search.roblox.com"'
+          add_entry 'ROBLOX_GAMEJOIN_API          = "https://gamejoin.roblox.com"'
+          add_entry 'ROBLOX_MATCHMAKING_API       = "https://matchmaking.roblox.com"'
+          add_entry 'ROBLOX_GAMEPERSISTENCE_API   = "https://gamepersistence.roblox.com"'
+          add_entry 'ROBLOX_PREMIUMFEATURES_API   = "https://premiumfeatures.roblox.com"'
+          add_entry 'ROBLOX_BILLING_API           = "https://billing.roblox.com"'
+          add_entry 'ROBLOX_TRADES_API            = "https://trades.roblox.com"'
+          add_entry 'ROBLOX_TRANSLATIONS_API      = "https://translations.roblox.com"'
+          add_entry 'ROBLOX_LOCALE_API            = "https://locale.roblox.com"'
+          add_entry 'ROBLOX_CAPTCHA_API           = "https://captcha.roblox.com"'
+          add_entry 'ROBLOX_GRAPHQL_API           = "https://graphql.roblox.com"'
+          add_entry 'ROBLOX_CLIENTSETTINGS_API    = "https://clientsettings.api.roblox.com"'
+
+          add_entry 'ROBLOX_CDN                   = "https://rbxcdn.com"'
+          add_entry 'ROBLOX_SETUP_CDN             = "https://setup.rbxcdn.com"'
+          add_entry 'ROBLOX_API_CDN               = "https://api.rbxcdn.com"'
+          add_entry 'ROBLOX_ASSET_DELIVERY        = "https://assetdelivery.roblox.com"'
+          add_entry 'ROBLOX_CONTENT_DELIVERY      = "https://contentdelivery.roblox.com"'
+          add_entry 'ROBLOX_CLIENTSETTINGS_CDN    = "https://clientsettingscdn.roblox.com"'
+          add_entry 'ROBLOX_ECONOMY_CDN           = "https://economycdn.roblox.com"'
+          add_entry 'ROBLOX_SETUP                 = "https://setup.roblox.com"'
+          add_entry 'ROBLOX_UPDATE                = "https://update.roblox.com"'
+
+          add_entry 'ROBLOX_TELEMETRY             = "https://telemetry.roblox.com"'
+          add_entry 'ROBLOX_CLIENT_TELEMETRY      = "https://client-telemetry.roblox.com"'
+          add_entry 'ROBLOX_METRICS               = "https://metrics.roblox.com"'
+          add_entry 'ROBLOX_GAME_ANALYTICS        = "https://gameanalytics.roblox.com"'
+          add_entry 'ROBLOX_ECS                   = "https://ecs.roblox.com"'
+          add_entry 'ROBLOX_AB_TESTING            = "https://abtesting.roblox.com"'
+          add_entry 'ROBLOX_EPHEMERAL_COUNTERS    = "https://ephemeralcounters.api.roblox.com"'
+
+          add_entry 'ROBLOX_STUDIO                = "https://studio.roblox.com"'
+          add_entry 'ROBLOX_CLIENT                = "https://client.roblox.com"'
+          add_entry 'ROBLOX_VERSION_COMPAT        = "https://versioncompatibility.roblox.com"'
+
+          add_entry 'ROBLOX_IP_GW1                = "PING:128.116.0.1"'
+          add_entry 'ROBLOX_IP_GW2                = "PING:128.116.0.2"'
+          add_entry 'ROBLOX_IP_GAME1              = "PING:128.116.64.1"'
+          add_entry 'ROBLOX_IP_GAME2              = "PING:128.116.128.1"'
+
+          echo "Done patching ${FILE}"
+
+      - name: Commit patches & push
+        run: |
+          git add lists/list-general.txt utils/targets.txt
+          if git diff --cached --quiet; then
+            echo "Nothing new to commit in patch files."
+          else
+            git commit -m "chore: inject Roblox domains & targets [skip ci]"
+          fi
+          git push
