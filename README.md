@@ -20,6 +20,8 @@
 >
 > Репозиторий **автоматически** обновляется при каждом [commit](https://github.com/Flowseal/zapret-discord-youtube/commits/main/) у оригинального [`zapret-discord-youtube`](https://github.com/Flowseal/zapret-discord-youtube), тоесть это означает, то что при каждом обновлении оригинала - этот репозиторий **обновляется вместе с ним**, тем самым репозиторий остается всегда **актуальным** и дает доступ к вашей любимой игре - `Roblox`
 >
+> Добавляет тесты основных Roblox API в `targets.txt` для `service.bat` - `Run Tests`
+>
 > Репозиторий не меняет корневые и бинарные файлы (например, `WinDivert.dll`, `winws.exe`) оригинала.
 > 
 > **НО** Репозиторий может их модифицировать, если те были модифицированы в [оригнальном репозитории [`zapret-discord-youtube`]](https://github.com/Flowseal/zapret-discord-youtube).
