@@ -49,6 +49,12 @@ jobs:
             echo "New upstream commits found."
           fi
 
+      - name: Save current HEAD
+        if: steps.changes.outputs.has_new == 'true'
+        id: old_head
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Backup .github directory
         if: steps.changes.outputs.has_new == 'true'
         run: cp -r .github /tmp/.github_backup
@@ -73,7 +79,30 @@ jobs:
           git diff --cached --quiet || \
             git commit -m "chore: restore .github after upstream sync"
 
+      - name: Check if target files were modified in upstream
+        if: steps.changes.outputs.has_new == 'true'
+        id: files_changed
+        run: |
+          OLD_HEAD="${{ steps.old_head.outputs.sha }}"
+          
+          if git diff --name-only "$OLD_HEAD" HEAD | grep -qE '^lists/list-general\.txt$'; then
+            echo "list_general_changed=true" >> "$GITHUB_OUTPUT"
+            echo "✓ lists/list-general.txt was modified in upstream"
+          else
+            echo "list_general_changed=false" >> "$GITHUB_OUTPUT"
+            echo "✗ lists/list-general.txt was NOT modified"
+          fi
+          
+          if git diff --name-only "$OLD_HEAD" HEAD | grep -qE '^utils/targets\.txt$'; then
+            echo "targets_changed=true" >> "$GITHUB_OUTPUT"
+            echo "✓ utils/targets.txt was modified in upstream"
+          else
+            echo "targets_changed=false" >> "$GITHUB_OUTPUT"
+            echo "✗ utils/targets.txt was NOT modified"
+          fi
+
       - name: Inject Roblox domains → lists/list-general.txt
+        if: steps.changes.outputs.has_new == 'true' && steps.files_changed.outputs.list_general_changed == 'true'
         run: |
           FILE="lists/list-general.txt"
           mkdir -p "$(dirname "$FILE")"
@@ -255,6 +284,7 @@ jobs:
 
 
       - name: Inject Roblox targets → utils/targets.txt
+        if: steps.changes.outputs.has_new == 'true' && steps.files_changed.outputs.targets_changed == 'true'
         run: |
           FILE="utils/targets.txt"
           mkdir -p "$(dirname "$FILE")"
