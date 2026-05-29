@@ -30,13 +30,13 @@ jobs:
 
       - name: Create archives
         run: |
-          NAME="zapret-discord-youtube-${{ github.event.inputs.tag }}"
+          NAME="zapret-roblox-${{ github.event.inputs.tag }}"
           7z a "${NAME}.zip" bin/ lists/ utils/ *.bat
           rar a "${NAME}.rar" bin/ lists/ utils/ *.bat
 
       - name: Print SHA256 checksums
         run: |
-          NAME="zapret-discord-youtube-${{ github.event.inputs.tag }}"
+          NAME="zapret-roblox-${{ github.event.inputs.tag }}"
           sha256sum "${NAME}.zip" "${NAME}.rar"
 
       - name: Create GitHub Release
@@ -45,5 +45,5 @@ jobs:
           tag_name: ${{ github.event.inputs.tag }}
           name: ${{ github.event.inputs.tag }}
           files: |
-            zapret-discord-youtube-${{ github.event.inputs.tag }}.zip
-            zapret-discord-youtube-${{ github.event.inputs.tag }}.rar
+            zapret-roblox-${{ github.event.inputs.tag }}.zip
+            zapret-roblox-${{ github.event.inputs.tag }}.rar
